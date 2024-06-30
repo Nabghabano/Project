@@ -1,0 +1,64 @@
+stages:
+  - build
+  - test
+  - performance_test
+  - jira
+
+variables:
+  DOCKER_DRIVER: overlay2
+  JIRA_BASE_URL: "https://ahmadnaseer9155.atlassian.net"
+  JIRA_PROJECT_KEY: "KAN"
+  JIRA_USERNAME: "Ahmad Naseer"
+  JIRA_API_TOKEN: "ATATT3xFfGF0Lg2OEpra4nPfG0DnF5w1ouF7OukjBvxnsK8uGRkaRtEi3JYtSx_PddJyw4jMCogRN12HpmiFFb0kIUcZTMXnRSe8MXHWKvLGEzq7weW5YzaVdJHWct3WPpHPcpEfIJX4ud5imp7exzRw4Jb4rXJijGb9jGDjfVMX3DfEhTZmNcM=84648333"
+
+# Stage 1: Build Docker image
+build_docker_image:
+  stage: build
+  image: docker:24.0.7
+  services:
+    - docker:24.0.7-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - docker info
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:latest .
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_TOKEN
+    - docker push $CI_REGISTRY_IMAGE:latest
+  only:
+    - main
+
+# Stage 2: Run Unit Tests
+unit_tests:
+  stage: test
+  image: python:3.8-slim
+  script:
+    - pip install -r requirements.txt
+    - pytest
+  only:
+    - main
+
+# Stage 3: Run JMeter Performance Tests
+jmeter_performance_test:
+  stage: performance_test
+  image: docker:24.0.7
+  services:
+    - docker:24.0.7-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - dockerd &
+    - sleep 20
+    - docker info
+  script:
+    - mkdir -p ${CI_PROJECT_DIR}/reports
+    - cp ${CI_PROJECT_DIR}/test.jmx /test.jmx
+    - docker pull justb4/jmeter:latest
+    - docker run --rm -v ${CI_PROJECT_DIR}/test.jmx:/test.jmx -v ${CI_PROJECT_DIR}/reports:/tmp/reports -e JVM_ARGS="-Xms512m -Xmx512m" justb4/jmeter:latest  -n -t /test.jmx -l /tmp/reports/result.jtl -j /tmp/reports/jmeter.log -e -o /tmp/reports/output
+    - echo "JMeter test completed. Check the artifacts for results."
+  artifacts:
+    paths:
+      - ${CI_PROJECT_DIR}/reports/output
+    expire_in: 1 week
+  only:
+    - main
